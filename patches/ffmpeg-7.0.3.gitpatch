@@ -1,0 +1,44 @@
+diff --git a/libavcodec/cuviddec.c b/libavcodec/cuviddec.c
+index acc405f78a..9a86995421 100644
+--- a/libavcodec/cuviddec.c
++++ b/libavcodec/cuviddec.c
+@@ -317,7 +317,11 @@ static int CUDAAPI cuvid_handle_video_sequence(void *opaque, CUVIDEOFORMAT* form
+     }
+ 
+     fifo_size_inc = ctx->nb_surfaces;
++#if NVDECAPI_CHECK_VERSION(9, 0)
+     ctx->nb_surfaces = FFMAX(ctx->nb_surfaces, format->min_num_decode_surfaces + 3);
++#else
++    ctx->nb_surfaces = FFMAX(ctx->nb_surfaces, 3);
++#endif
+ 
+     if (avctx->extra_hw_frames > 0)
+         ctx->nb_surfaces += avctx->extra_hw_frames;
+diff --git a/libavcodec/libsvtav1.c b/libavcodec/libsvtav1.c
+index 8fa42d590b..5cbc5b5cf0 100644
+--- a/libavcodec/libsvtav1.c
++++ b/libavcodec/libsvtav1.c
+@@ -234,7 +234,11 @@ static int config_enc_params(EbSvtAv1EncConfiguration *param,
+     } else if (svt_enc->qp > 0) {
+         param->qp                   = svt_enc->qp;
+         param->rate_control_mode    = 0;
++#if SVT_AV1_CHECK_VERSION(4, 0, 0)
++        param->aq_mode = 0;
++#else
+         param->enable_adaptive_quantization = 0;
++#endif
+     }
+ 
+     desc = av_pix_fmt_desc_get(avctx->pix_fmt);
+@@ -430,7 +434,11 @@ static av_cold int eb_enc_init(AVCodecContext *avctx)
+ 
+     svt_enc->eos_flag = EOS_NOT_REACHED;
+ 
++#if SVT_AV1_CHECK_VERSION(3, 0, 0)
++    svt_ret = svt_av1_enc_init_handle(&svt_enc->svt_handle, &svt_enc->enc_params);
++#else
+     svt_ret = svt_av1_enc_init_handle(&svt_enc->svt_handle, svt_enc, &svt_enc->enc_params);
++#endif
+     if (svt_ret != EB_ErrorNone) {
+         return svt_print_error(avctx, svt_ret, "Error initializing encoder handle");
+     }

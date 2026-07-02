@@ -1,0 +1,864 @@
+diff -aruN include/c++/11/bits/hashtable.h include-patched/c++/11/bits/hashtable.h
+--- include/c++/11/bits/hashtable.h	2023-02-16 08:55:10.000000000 +0000
++++ include-patched/c++/11/bits/hashtable.h	2026-04-29 11:28:42.520735266 +0000
+@@ -57,7 +57,7 @@
+     using _Hashtable_enable_default_ctor
+       = _Enable_default_constructor<__and_<is_default_constructible<_Equal>,
+ 				       is_default_constructible<_Hash>,
+-				       is_default_constructible<_Allocator>>{},
++				       is_default_constructible<_Allocator>>::value,
+ 				    __detail::_Hash_node_base>;
+ 
+   /**
+@@ -201,7 +201,7 @@
+       static_assert(is_same<typename remove_cv<_Value>::type, _Value>::value,
+ 	  "unordered container must have a non-const, non-volatile value_type");
+ #if __cplusplus > 201703L || defined __STRICT_ANSI__
+-      static_assert(is_same<typename _Alloc::value_type, _Value>{},
++      static_assert(is_same<typename _Alloc::value_type, _Value>::value,
+ 	  "unordered container must have the same value_type as its allocator");
+ #endif
+ 
+diff -aruN include/c++/11/bits/hashtable_policy.h include-patched/c++/11/bits/hashtable_policy.h
+--- include/c++/11/bits/hashtable_policy.h	2023-02-16 08:55:10.000000000 +0000
++++ include-patched/c++/11/bits/hashtable_policy.h	2026-04-29 11:29:24.563385832 +0000
+@@ -1214,7 +1214,7 @@
+       __hash_code
+       _M_hash_code(const _Key& __k) const
+       {
+-	static_assert(__is_invocable<const _Hash&, const _Key&>{},
++	static_assert(__is_invocable<const _Hash&, const _Key&>::value,
+ 	    "hash function must be invocable with an argument of key type");
+ 	return _M_hash()(__k);
+       }
+@@ -1223,7 +1223,7 @@
+ 	__hash_code
+ 	_M_hash_code_tr(const _Kt& __k) const
+ 	{
+-	  static_assert(__is_invocable<const _Hash&, const _Kt&>{},
++	  static_assert(__is_invocable<const _Hash&, const _Kt&>::value,
+ 	    "hash function must be invocable with an argument of key type");
+ 	  return _M_hash()(__k);
+ 	}
+@@ -1611,7 +1611,7 @@
+       _M_equals(const _Key& __k, __hash_code __c,
+ 		const _Hash_node_value<_Value, __hash_cached::value>& __n) const
+       {
+-	static_assert(__is_invocable<const _Equal&, const _Key&, const _Key&>{},
++	static_assert(__is_invocable<const _Equal&, const _Key&, const _Key&>::value,
+ 	  "key equality predicate must be invocable with two arguments of "
+ 	  "key type");
+ 	return _S_equals(__c, __n) && _M_eq()(__k, _ExtractKey{}(__n._M_v()));
+@@ -1624,7 +1624,7 @@
+ 					    __hash_cached::value>& __n) const
+ 	{
+ 	  static_assert(
+-	    __is_invocable<const _Equal&, const _Kt&, const _Key&>{},
++	    __is_invocable<const _Equal&, const _Kt&, const _Key&>::value,
+ 	    "key equality predicate must be invocable with two arguments of "
+ 	    "key type");
+ 	  return _S_equals(__c, __n) && _M_eq()(__k, _ExtractKey{}(__n._M_v()));
+diff -aruN include/c++/11/bits/move.h include-patched/c++/11/bits/move.h
+--- include/c++/11/bits/move.h	2023-02-16 08:55:10.000000000 +0000
++++ include-patched/c++/11/bits/move.h	2026-04-29 12:15:11.585934126 +0000
+@@ -35,6 +35,10 @@
+ # include <bits/concept_check.h>
+ #endif
+ 
++#ifdef __CUDACC__
++#include <type_traits>
++#endif
++
+ namespace std _GLIBCXX_VISIBILITY(default)
+ {
+ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+@@ -44,10 +48,26 @@
+    *  @brief Same as C++11 std::addressof
+    *  @ingroup utilities
+    */
++#ifdef __CUDACC__
++# if __cplusplus >= 201703L
++#  error The workaround of "__addressof()" for old CUDA is not compatible with the c++17 standard
++# else
++  template<typename _Tp>
++    inline _GLIBCXX_CONSTEXPR typename enable_if<is_object<_Tp>::value, _Tp*>::type
++    __addressof(_Tp& __r) _GLIBCXX_NOEXCEPT
++    { return reinterpret_cast<_Tp*>(&const_cast<char&>(reinterpret_cast<const volatile char&>(__r))); }
++
++  template<typename _Tp>
++    inline _GLIBCXX_CONSTEXPR typename enable_if<!is_object<_Tp>::value, _Tp*>::type
++    __addressof(_Tp& __r) _GLIBCXX_NOEXCEPT
++    { return &__r; }
++# endif
++#else
+   template<typename _Tp>
+     inline _GLIBCXX_CONSTEXPR _Tp*
+     __addressof(_Tp& __r) _GLIBCXX_NOEXCEPT
+     { return __builtin_addressof(__r); }
++#endif
+ 
+ #if __cplusplus >= 201103L
+ 
+diff -aruN include/c++/11/bits/std_function.h include-patched/c++/11/bits/std_function.h
+--- include/c++/11/bits/std_function.h	2023-02-16 08:55:10.000000000 +0000
++++ include-patched/c++/11/bits/std_function.h	2026-04-29 11:38:08.439431841 +0000
+@@ -353,8 +353,11 @@
+ 	using _Requires = __enable_if_t<_Cond::value, _Tp>;
+ 
+       template<typename _Functor>
+-	using _Handler
+-	  = _Function_handler<_Res(_ArgTypes...), __decay_t<_Functor>>;
++        struct _Handler_helper
++        { using type = _Function_handler<_Res(_ArgTypes...), __decay_t<_Functor>>; };
++
++      template<typename _Functor>
++  using _Handler = typename _Handler_helper<_Functor>::type;
+ 
+     public:
+       typedef _Res result_type;
+diff -aruN include/c++/11/bits/stl_algobase.h include-patched/c++/11/bits/stl_algobase.h
+--- include/c++/11/bits/stl_algobase.h	2023-02-16 08:55:10.000000000 +0000
++++ include-patched/c++/11/bits/stl_algobase.h	2026-04-29 11:39:15.325471215 +0000
+@@ -1086,7 +1086,7 @@
+ 	       std::output_iterator_tag)
+     {
+ #if __cplusplus >= 201103L
+-      static_assert(is_integral<_Size>{}, "fill_n must pass integral size");
++      static_assert(is_integral<_Size>::value, "fill_n must pass integral size");
+ #endif
+       return __fill_n_a1(__first, __n, __value);
+     }
+@@ -1098,7 +1098,7 @@
+ 	       std::input_iterator_tag)
+     {
+ #if __cplusplus >= 201103L
+-      static_assert(is_integral<_Size>{}, "fill_n must pass integral size");
++      static_assert(is_integral<_Size>::value, "fill_n must pass integral size");
+ #endif
+       return __fill_n_a1(__first, __n, __value);
+     }
+@@ -1110,7 +1110,7 @@
+ 	       std::random_access_iterator_tag)
+     {
+ #if __cplusplus >= 201103L
+-      static_assert(is_integral<_Size>{}, "fill_n must pass integral size");
++      static_assert(is_integral<_Size>::value, "fill_n must pass integral size");
+ #endif
+       if (__n <= 0)
+ 	return __first;
+diff -aruN include/c++/11/bits/stl_tree.h include-patched/c++/11/bits/stl_tree.h
+--- include/c++/11/bits/stl_tree.h	2023-02-16 08:55:10.000000000 +0000
++++ include-patched/c++/11/bits/stl_tree.h	2026-04-29 11:44:55.475643271 +0000
+@@ -666,7 +666,7 @@
+ 
+ 	  _Rb_tree_impl()
+ 	    _GLIBCXX_NOEXCEPT_IF(
+-		is_nothrow_default_constructible<_Node_allocator>::value
++    is_nothrow_default_constructible<_Rb_tree::_Node_allocator>::value
+ 		&& is_nothrow_default_constructible<_Base_key_compare>::value )
+ 	  : _Node_allocator()
+ 	  { }
+@@ -759,13 +759,13 @@
+ #if __cplusplus >= 201103L
+ 	// If we're asking for the key we're presumably using the comparison
+ 	// object, and so this is a good place to sanity check it.
+-	static_assert(__is_invocable<_Compare&, const _Key&, const _Key&>{},
++	static_assert(__is_invocable<_Compare&, const _Key&, const _Key&>::value,
+ 		      "comparison object must be invocable "
+ 		      "with two arguments of key type");
+ # if __cplusplus >= 201703L
+ 	// _GLIBCXX_RESOLVE_LIB_DEFECTS
+ 	// 2542. Missing const requirements for associative containers
+-	if constexpr (__is_invocable<_Compare&, const _Key&, const _Key&>{})
++	if constexpr (__is_invocable<_Compare&, const _Key&, const _Key&>::value)
+ 	  static_assert(
+ 	      is_invocable_v<const _Compare&, const _Key&, const _Key&>,
+ 	      "comparison object must be invocable as const");
+@@ -2081,7 +2081,7 @@
+ 	}
+       if (_M_impl._M_key_compare(_S_key(__j._M_node), __k))
+ 	return _Res(__x, __y);
+-      return _Res(__j._M_node, 0);
++      return _Res(__j._M_node, nullptr);
+     }
+ 
+   template<typename _Key, typename _Val, typename _KeyOfValue,
+@@ -2172,7 +2172,7 @@
+ 	{
+ 	  if (size() > 0
+ 	      && _M_impl._M_key_compare(_S_key(_M_rightmost()), __k))
+-	    return _Res(0, _M_rightmost());
++	    return _Res(nullptr, _M_rightmost());
+ 	  else
+ 	    return _M_get_insert_unique_pos(__k);
+ 	}
+@@ -2185,7 +2185,7 @@
+ 	  else if (_M_impl._M_key_compare(_S_key((--__before)._M_node), __k))
+ 	    {
+ 	      if (_S_right(__before._M_node) == 0)
+-		return _Res(0, __before._M_node);
++		return _Res(nullptr, __before._M_node);
+ 	      else
+ 		return _Res(__pos._M_node, __pos._M_node);
+ 	    }
+@@ -2197,11 +2197,11 @@
+ 	  // ... then try after.
+ 	  iterator __after = __pos;
+ 	  if (__pos._M_node == _M_rightmost())
+-	    return _Res(0, _M_rightmost());
++	    return _Res(nullptr, _M_rightmost());
+ 	  else if (_M_impl._M_key_compare(__k, _S_key((++__after)._M_node)))
+ 	    {
+ 	      if (_S_right(__pos._M_node) == 0)
+-		return _Res(0, __pos._M_node);
++		return _Res(nullptr, __pos._M_node);
+ 	      else
+ 		return _Res(__after._M_node, __after._M_node);
+ 	    }
+@@ -2210,7 +2210,7 @@
+ 	}
+       else
+ 	// Equivalent keys.
+-	return _Res(__pos._M_node, 0);
++	return _Res(__pos._M_node, nullptr);
+     }
+ 
+   template<typename _Key, typename _Val, typename _KeyOfValue,
+@@ -2257,7 +2257,7 @@
+ 	{
+ 	  if (size() > 0
+ 	      && !_M_impl._M_key_compare(__k, _S_key(_M_rightmost())))
+-	    return _Res(0, _M_rightmost());
++	    return _Res(nullptr, _M_rightmost());
+ 	  else
+ 	    return _M_get_insert_equal_pos(__k);
+ 	}
+@@ -2270,7 +2270,7 @@
+ 	  else if (!_M_impl._M_key_compare(__k, _S_key((--__before)._M_node)))
+ 	    {
+ 	      if (_S_right(__before._M_node) == 0)
+-		return _Res(0, __before._M_node);
++		return _Res(nullptr, __before._M_node);
+ 	      else
+ 		return _Res(__pos._M_node, __pos._M_node);
+ 	    }
+@@ -2282,16 +2282,16 @@
+ 	  // ... then try after.
+ 	  iterator __after = __pos;
+ 	  if (__pos._M_node == _M_rightmost())
+-	    return _Res(0, _M_rightmost());
++	    return _Res(nullptr, _M_rightmost());
+ 	  else if (!_M_impl._M_key_compare(_S_key((++__after)._M_node), __k))
+ 	    {
+ 	      if (_S_right(__pos._M_node) == 0)
+-		return _Res(0, __pos._M_node);
++		return _Res(nullptr, __pos._M_node);
+ 	      else
+ 		return _Res(__after._M_node, __after._M_node);
+ 	    }
+ 	  else
+-	    return _Res(0, 0);
++	    return _Res(nullptr, nullptr);
+ 	}
+     }
+ 
+diff -aruN include/c++/11/bits/uniform_int_dist.h include-patched/c++/11/bits/uniform_int_dist.h
+--- include/c++/11/bits/uniform_int_dist.h	2023-02-16 08:55:10.000000000 +0000
++++ include-patched/c++/11/bits/uniform_int_dist.h	2026-04-29 11:46:12.205450441 +0000
+@@ -375,11 +375,11 @@
+ 	typedef typename make_unsigned<result_type>::type __utype;
+ 	typedef typename common_type<_Gresult_type, __utype>::type __uctype;
+ 
+-	static_assert( __urng.min() < __urng.max(),
++	constexpr __uctype __urngmin = _UniformRandomBitGenerator::min();
++	constexpr __uctype __urngmax = _UniformRandomBitGenerator::max();
++	static_assert( __urngmin < __urngmax,
+ 	    "Uniform random bit generator must define min() < max()");
+ 
+-	constexpr __uctype __urngmin = __urng.min();
+-	constexpr __uctype __urngmax = __urng.max();
+ 	constexpr __uctype __urngrange = __urngmax - __urngmin;
+ 	const __uctype __urange
+ 	  = __uctype(__param.b()) - __uctype(__param.a());
+diff -aruN include/c++/11/bits/unique_ptr.h include-patched/c++/11/bits/unique_ptr.h
+--- include/c++/11/bits/unique_ptr.h	2023-02-16 08:55:10.000000000 +0000
++++ include-patched/c++/11/bits/unique_ptr.h	2026-04-29 11:47:20.251511113 +0000
+@@ -208,6 +208,7 @@
+     struct __uniq_ptr_data : __uniq_ptr_impl<_Tp, _Dp>
+     {
+       using __uniq_ptr_impl<_Tp, _Dp>::__uniq_ptr_impl;
++      __uniq_ptr_data() = default;
+       __uniq_ptr_data(__uniq_ptr_data&&) = default;
+       __uniq_ptr_data& operator=(__uniq_ptr_data&&) = default;
+     };
+@@ -216,6 +217,7 @@
+     struct __uniq_ptr_data<_Tp, _Dp, true, false> : __uniq_ptr_impl<_Tp, _Dp>
+     {
+       using __uniq_ptr_impl<_Tp, _Dp>::__uniq_ptr_impl;
++      __uniq_ptr_data() = default;
+       __uniq_ptr_data(__uniq_ptr_data&&) = default;
+       __uniq_ptr_data& operator=(__uniq_ptr_data&&) = delete;
+     };
+@@ -224,6 +226,7 @@
+     struct __uniq_ptr_data<_Tp, _Dp, false, true> : __uniq_ptr_impl<_Tp, _Dp>
+     {
+       using __uniq_ptr_impl<_Tp, _Dp>::__uniq_ptr_impl;
++      __uniq_ptr_data() = default;
+       __uniq_ptr_data(__uniq_ptr_data&&) = delete;
+       __uniq_ptr_data& operator=(__uniq_ptr_data&&) = default;
+     };
+@@ -232,6 +235,7 @@
+     struct __uniq_ptr_data<_Tp, _Dp, false, false> : __uniq_ptr_impl<_Tp, _Dp>
+     {
+       using __uniq_ptr_impl<_Tp, _Dp>::__uniq_ptr_impl;
++      __uniq_ptr_data() = default;
+       __uniq_ptr_data(__uniq_ptr_data&&) = delete;
+       __uniq_ptr_data& operator=(__uniq_ptr_data&&) = delete;
+     };
+diff -aruN include/c++/11/chrono include-patched/c++/11/chrono
+--- include/c++/11/chrono	2023-02-16 08:55:10.000000000 +0000
++++ include-patched/c++/11/chrono	2026-04-29 11:49:19.288128722 +0000
+@@ -494,9 +494,16 @@
+ 				 (_R1::den / __gcd2) * (_R2::num / __gcd1)>;
+ 
+ 	// _Period2 is an exact multiple of _Period
++  template<typename _Period2, bool>
++    struct __Is_harmonic_helper
++    { using type = __bool_constant<false>; };
++	template<typename _Period2>
++    struct __Is_harmonic_helper<_Period2, true>
++    { using type = __bool_constant<__divide<_Period2, _Period>::den == 1>; };
++
+ 	template<typename _Period2>
+ 	  using __is_harmonic
+-	    = __bool_constant<__divide<_Period2, _Period>::den == 1>;
++	    = typename __Is_harmonic_helper<_Period2, __is_ratio<_Period2>::value>::type;
+ 
+       public:
+ 
+diff -aruN include/c++/11/tuple include-patched/c++/11/tuple
+--- include/c++/11/tuple	2023-02-16 08:55:10.000000000 +0000
++++ include-patched/c++/11/tuple	2026-04-29 11:50:14.250570696 +0000
+@@ -611,7 +611,11 @@
+       typedef _Tuple_impl<0, _Elements...> _Inherited;
+ 
+       template<bool _Cond>
+-	using _TCC = _TupleConstraints<_Cond, _Elements...>;
++        struct _TCC_helper
++        { using type = _TupleConstraints<_Cond, _Elements...>; };
++
++      template<bool _Cond>
++  using _TCC = typename _TCC_helper<_Cond>::type;
+ 
+       // Constraint for non-explicit default constructor
+       template<bool _Dummy>
+diff -aruN include/c++/11/type_traits include-patched/c++/11/type_traits
+--- include/c++/11/type_traits	2023-02-16 08:55:10.000000000 +0000
++++ include-patched/c++/11/type_traits	2026-04-29 12:15:39.545179582 +0000
+@@ -701,7 +701,7 @@
+     struct is_trivial
+     : public integral_constant<bool, __is_trivial(_Tp)>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -710,7 +710,7 @@
+     struct is_trivially_copyable
+     : public integral_constant<bool, __is_trivially_copyable(_Tp)>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -719,7 +719,7 @@
+     struct is_standard_layout
+     : public integral_constant<bool, __is_standard_layout(_Tp)>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -733,7 +733,7 @@
+     is_pod
+     : public integral_constant<bool, __is_pod(_Tp)>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -746,7 +746,7 @@
+     is_literal_type
+     : public integral_constant<bool, __is_literal_type(_Tp)>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -882,7 +882,7 @@
+     struct is_destructible
+     : public __is_destructible_safe<_Tp>::type
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -936,7 +936,7 @@
+     struct is_nothrow_destructible
+     : public __is_nt_destructible_safe<_Tp>::type
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -952,7 +952,7 @@
+     struct is_constructible
+       : public __is_constructible_impl<_Tp, _Args...>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -961,7 +961,7 @@
+     struct is_default_constructible
+     : public __is_constructible_impl<_Tp>::type
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -984,7 +984,7 @@
+     struct is_copy_constructible
+     : public __is_copy_constructible_impl<_Tp>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1007,7 +1007,7 @@
+     struct is_move_constructible
+     : public __is_move_constructible_impl<_Tp>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1022,7 +1022,7 @@
+     struct is_nothrow_constructible
+     : public __is_nothrow_constructible_impl<_Tp, _Args...>::type
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1031,7 +1031,7 @@
+     struct is_nothrow_default_constructible
+     : public __bool_constant<__is_nothrow_constructible(_Tp)>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1054,7 +1054,7 @@
+     struct is_nothrow_copy_constructible
+     : public __is_nothrow_copy_constructible_impl<_Tp>::type
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1077,16 +1077,36 @@
+     struct is_nothrow_move_constructible
+     : public __is_nothrow_move_constructible_impl<_Tp>::type
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+   /// is_assignable
++#ifdef __CUDACC__
++  template<typename _Tp, typename _Up>
++    class __is_assignable_helper
++    {
++      template<typename = decltype(declval<_Tp>() = declval<_Up>())>
++        static true_type __test(int);
++      
++      template<typename = void>
++        static false_type __test(...);
++      
++    public:
++      typedef decltype(__test(0)) type;
++    };
++  
++#endif
++
+   template<typename _Tp, typename _Up>
+     struct is_assignable
++#ifdef __CUDACC__
++    : public __is_assignable_helper<_Tp, _Up>::type
++#else
+     : public __bool_constant<__is_assignable(_Tp, _Up)>
++#endif
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1099,7 +1119,11 @@
+ 
+   template<typename _Tp>
+     struct __is_copy_assignable_impl<_Tp, true>
++#ifdef __CUDACC__
++    : public __is_assignable_helper<_Tp&, const _Tp&>::type
++#else
+     : public __bool_constant<__is_assignable(_Tp&, const _Tp&)>
++#endif
+     { };
+ 
+   /// is_copy_assignable
+@@ -1107,7 +1131,7 @@
+     struct is_copy_assignable
+     : public __is_copy_assignable_impl<_Tp>::type
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1120,7 +1144,11 @@
+ 
+   template<typename _Tp>
+     struct __is_move_assignable_impl<_Tp, true>
++#ifdef __CUDACC__
++    : public __is_assignable_helper<_Tp&, _Tp&&>::type
++#else
+     : public __bool_constant<__is_assignable(_Tp&, _Tp&&)>
++#endif
+     { };
+ 
+   /// is_move_assignable
+@@ -1128,7 +1156,7 @@
+     struct is_move_assignable
+     : public __is_move_assignable_impl<_Tp>::type
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1141,7 +1169,7 @@
+     struct is_nothrow_assignable
+     : public __is_nothrow_assignable_impl<_Tp, _Up>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1162,7 +1190,7 @@
+     struct is_nothrow_copy_assignable
+     : public __is_nt_copy_assignable_impl<_Tp>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1183,7 +1211,7 @@
+     struct is_nothrow_move_assignable
+     : public __is_nt_move_assignable_impl<_Tp>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1192,7 +1220,7 @@
+     struct is_trivially_constructible
+     : public __bool_constant<__is_trivially_constructible(_Tp, _Args...)>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1201,7 +1229,7 @@
+     struct is_trivially_default_constructible
+     : public __bool_constant<__is_trivially_constructible(_Tp)>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1254,7 +1282,7 @@
+     struct is_trivially_copy_constructible
+     : public __is_trivially_copy_constructible_impl<_Tp>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1277,7 +1305,7 @@
+     struct is_trivially_move_constructible
+     : public __is_trivially_move_constructible_impl<_Tp>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1286,7 +1314,7 @@
+     struct is_trivially_assignable
+     : public __bool_constant<__is_trivially_assignable(_Tp, _Up)>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1307,7 +1335,7 @@
+     struct is_trivially_copy_assignable
+     : public __is_trivially_copy_assignable_impl<_Tp>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1328,7 +1356,7 @@
+     struct is_trivially_move_assignable
+     : public __is_trivially_move_assignable_impl<_Tp>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1338,7 +1366,7 @@
+     : public __and_<__is_destructible_safe<_Tp>,
+ 		    __bool_constant<__has_trivial_destructor(_Tp)>>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1348,7 +1376,7 @@
+     struct has_virtual_destructor
+     : public integral_constant<bool, __has_virtual_destructor(_Tp)>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1360,7 +1388,7 @@
+     struct alignment_of
+     : public integral_constant<std::size_t, alignof(_Tp)>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -1402,14 +1430,14 @@
+   /// is_same
+   template<typename _Tp, typename _Up>
+     struct is_same
+-#ifdef _GLIBCXX_HAVE_BUILTIN_IS_SAME
++#if !defined(__CUDACC__) && defined(_GLIBCXX_HAVE_BUILTIN_IS_SAME) 
+     : public integral_constant<bool, __is_same(_Tp, _Up)>
+ #else
+     : public false_type
+ #endif
+     { };
+ 
+-#ifndef _GLIBCXX_HAVE_BUILTIN_IS_SAME
++#if defined(__CUDACC__) || !defined(_GLIBCXX_HAVE_BUILTIN_IS_SAME) 
+   template<typename _Tp>
+     struct is_same<_Tp, _Tp>
+     : public true_type
+@@ -2751,7 +2779,7 @@
+     struct is_swappable
+     : public __is_swappable_impl<_Tp>::type
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -2760,7 +2788,7 @@
+     struct is_nothrow_swappable
+     : public __is_nothrow_swappable_impl<_Tp>::type
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+@@ -2843,7 +2871,7 @@
+     struct is_swappable_with
+     : public __is_swappable_with_impl<_Tp, _Up>::type
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"first template argument must be a complete class or an unbounded array");
+       static_assert(std::__is_complete_or_unbounded(__type_identity<_Up>{}),
+ 	"second template argument must be a complete class or an unbounded array");
+@@ -2854,7 +2882,7 @@
+     struct is_nothrow_swappable_with
+     : public __is_nothrow_swappable_with_impl<_Tp, _Up>::type
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"first template argument must be a complete class or an unbounded array");
+       static_assert(std::__is_complete_or_unbounded(__type_identity<_Up>{}),
+ 	"second template argument must be a complete class or an unbounded array");
+@@ -3245,7 +3273,7 @@
+   inline constexpr size_t rank_v = rank<_Tp>::value;
+ template <typename _Tp, unsigned _Idx = 0>
+   inline constexpr size_t extent_v = extent<_Tp, _Idx>::value;
+-#ifdef _GLIBCXX_HAVE_BUILTIN_IS_SAME
++#if !defined(__CUDACC__) && defined(_GLIBCXX_HAVE_BUILTIN_IS_SAME) 
+ template <typename _Tp, typename _Up>
+   inline constexpr bool is_same_v = __is_same(_Tp, _Up);
+ #else
+@@ -3278,7 +3306,7 @@
+       remove_cv_t<remove_all_extents_t<_Tp>>
+       )>
+     {
+-      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>{}),
++      static_assert(std::__is_complete_or_unbounded(__type_identity<_Tp>()),
+ 	"template argument must be a complete class or an unbounded array");
+     };
+ 
+diff -aruN include/c++/11/utility include-patched/c++/11/utility
+--- include/c++/11/utility	2023-02-16 08:55:10.000000000 +0000
++++ include-patched/c++/11/utility	2026-04-29 12:15:56.328726176 +0000
+@@ -293,10 +293,30 @@
+ 
+ #endif // C++14
+ 
++#ifdef __CUDACC__
++  template<typename _Tp, _Tp... _Indexes>
++    struct _Indexes_extender
++    { typedef _Indexes_extender<_Tp, _Indexes..., _Tp(sizeof...(_Indexes))> __next; };
++            
++  template<typename _Tp, size_t _Num>
++    struct _Indexes_builder
++    { typedef typename _Indexes_builder<_Tp, _Num - 1>::type::__next type; };
++                          
++  template<typename _Tp>
++    struct _Indexes_builder<_Tp, 0>
++    { typedef _Indexes_extender<_Tp> type; };
++#endif
++
+   // Stores a tuple of indices.  Used by tuple and pair, and by bind() to
+   // extract the elements in a tuple.
+   template<size_t... _Indexes> struct _Index_tuple { };
+ 
++#ifdef __CUDACC__
++  template<size_t... _Indexes>
++  constexpr _Index_tuple<_Indexes...> _get_tuple_from_extender(_Indexes_extender<size_t, _Indexes...>)
++  { return {}; }
++#endif
++
+   // Builds an _Index_tuple<0, 1, 2, ..., _Num-1>.
+   template<size_t _Num>
+     struct _Build_index_tuple
+@@ -308,8 +328,12 @@
+       // Clang defines __make_integer_seq for this purpose.
+       using __type = __make_integer_seq<_IdxTuple, size_t, _Num>;
+ #else
++# ifdef __CUDACC__
++      using __type = decltype(_get_tuple_from_extender(typename _Indexes_builder<size_t, _Num>::type()));
++# else
+       // For GCC and other compilers, use __integer_pack instead.
+       using __type = _Index_tuple<__integer_pack(_Num)...>;
++# endif
+ #endif
+     };
+ 
+@@ -325,13 +349,23 @@
+       static constexpr size_t size() noexcept { return sizeof...(_Idx); }
+     };
+ 
++#ifdef __CUDACC__
++  template<typename _Tp, _Tp... _Idx>
++  constexpr integer_sequence<_Tp, _Idx...> _get_sequence_from_extender(_Indexes_extender<_Tp, _Idx...>)
++  { return {}; }
++#endif
++
+   /// Alias template make_integer_sequence
+   template<typename _Tp, _Tp _Num>
+     using make_integer_sequence
+ #if __has_builtin(__make_integer_seq)
+       = __make_integer_seq<integer_sequence, _Tp, _Num>;
+ #else
++# ifdef __CUDACC__
++      = decltype(_get_sequence_from_extender(typename _Indexes_builder<_Tp, _Num>::type()));
++# else
+       = integer_sequence<_Tp, __integer_pack(_Num)...>;
++# endif
+ #endif
+ 
+   /// Alias template index_sequence
+diff -aruN include/x86_64-linux-gnu/bits/string_fortified.h include-patched/x86_64-linux-gnu/bits/string_fortified.h
+--- include/x86_64-linux-gnu/bits/string_fortified.h	2025-08-25 19:11:05.000000000 +0000
++++ include-patched/x86_64-linux-gnu/bits/string_fortified.h	2026-04-29 12:13:50.560114902 +0000
+@@ -97,7 +97,7 @@
+ }
+ 
+ #ifdef __USE_XOPEN2K8
+-# if __GNUC_PREREQ (4, 7) || __glibc_clang_prereq (2, 6)
++# if !defined(__CUDACC__) && (__GNUC_PREREQ (4, 7) || __glibc_clang_prereq (2, 6))
+ __fortify_function char *
+ __NTH (stpncpy (char *__dest, const char *__src, size_t __n))
+ {
+diff -aruN include/x86_64-linux-gnu/c++/11/bits/c++config.h include-patched/x86_64-linux-gnu/c++/11/bits/c++config.h
+--- include/x86_64-linux-gnu/c++/11/bits/c++config.h	2023-02-16 08:55:10.000000000 +0000
++++ include-patched/x86_64-linux-gnu/c++/11/bits/c++config.h	2026-04-29 12:18:54.619891212 +0000
+@@ -2142,3 +2142,13 @@
+ #endif
+ 
+ #endif // _GLIBCXX_CXX_CONFIG_H
++
++#ifdef __CUDACC__
++#if _GLIBCXX_HAVE_BUILTIN_IS_CONSTANT_EVALUATED
++#undef _GLIBCXX_HAVE_BUILTIN_IS_CONSTANT_EVALUATED
++// Forcing __builtin_is_constant_evaluated() to always be evaluated to false,
++// so that it would have the effect like __builtin_is_constant_evaluated()
++// is not supported
++# define __builtin_is_constant_evaluated() false
++#endif
++#endif
+diff -aruN include/x86_64-linux-gnu/sys/cdefs.h include-patched/x86_64-linux-gnu/sys/cdefs.h
+--- include/x86_64-linux-gnu/sys/cdefs.h	2025-08-25 19:11:05.000000000 +0000
++++ include-patched/x86_64-linux-gnu/sys/cdefs.h	2026-04-29 12:20:19.113590021 +0000
+@@ -685,7 +685,7 @@
+ #  define __attr_access_none(argno)
+ #endif
+ 
+-#if __GNUC_PREREQ (11, 0)
++#if !defined(__CUDACC__) && __GNUC_PREREQ (11, 0)
+ /* Designates dealloc as a function to call to deallocate objects
+    allocated by the declared function.  */
+ # define __attr_dealloc(dealloc, argno) \

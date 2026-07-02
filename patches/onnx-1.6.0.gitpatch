@@ -1,0 +1,47 @@
+diff --git a/onnx/__init__.py b/onnx/__init__.py
+index 3edeace9..f9279117 100644
+--- a/onnx/__init__.py
++++ b/onnx/__init__.py
+@@ -3,6 +3,17 @@ from __future__ import division
+ from __future__ import print_function
+ from __future__ import unicode_literals
+ 
++# Compatibility workaround:
++# 1. Adding back "object" type attribute to "numpy"
++# 2. Adding back "Iterable" type to "collections"
++# Note that these need to be placed before any imports,
++# so that they take effects as early as possible
++import numpy
++numpy.object = object
++import collections
++import collections.abc
++collections.Iterable = collections.abc.Iterable
++
+ import os
+ 
+ from .onnx_cpp2py_export import ONNX_ML
+@@ -21,7 +32,6 @@ import google.protobuf.message
+ from typing import Union, Text, IO, Optional, cast, TypeVar, Any
+ from six import string_types
+ 
+-
+ # f should be either readable or a file path
+ def _load_bytes(f):  # type: (Union[IO[bytes], Text]) -> bytes
+     if hasattr(f, 'read') and callable(cast(IO[bytes], f).read):
+diff --git a/setup.py b/setup.py
+index b9037e44..53a17867 100644
+--- a/setup.py
++++ b/setup.py
+@@ -286,10 +286,10 @@ ext_modules = [
+ packages = setuptools.find_packages()
+ 
+ install_requires.extend([
+-    'protobuf',
++    'protobuf>=3.20,<3.21',
+     'numpy',
+     'six',
+-    'typing>=3.6.4; python_version < "3.5"',
++    'typing>=3.6.4',
+     'typing-extensions>=3.6.2.1',
+ ])
+ 

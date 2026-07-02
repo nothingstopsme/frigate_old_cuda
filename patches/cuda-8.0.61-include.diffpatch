@@ -1,0 +1,120 @@
+diff -aruN include/cuda_fp16.h include-patched/cuda_fp16.h
+--- include/cuda_fp16.h	2026-04-09 01:40:35.372202073 +0800
++++ include-patched/cuda_fp16.h	2026-04-16 20:57:12.714955001 +0800
+@@ -91,19 +91,6 @@
+ #ifndef CUDA_FP16_H_JNESTUG4
+ #define CUDA_FP16_H_JNESTUG4
+ 
+-typedef struct __align__(2) {
+-   unsigned short x;
+-} __half;
+-
+-typedef struct __align__(4) {
+-   unsigned int x;
+-} __half2;
+-
+-#ifndef CUDA_NO_HALF
+-typedef __half half;
+-typedef __half2 half2;
+-#endif /*CUDA_NO_HALF*/
+-
+ #if defined(__CUDACC__)
+ 
+ #if !defined(__cplusplus)
+@@ -112,10 +99,38 @@
+ 
+ #if defined(__CUDACC_RTC__)
+ #define __CUDA_FP16_DECL__ __host__ __device__
++#define __CUDA_FP16_MEMBER_FN_DECL__ __CUDA_FP16_DECL__
+ #else /* !__CUDACC_RTC__ */
+ #define __CUDA_FP16_DECL__ static __device__ __inline__
++#define __CUDA_FP16_MEMBER_FN_DECL__ __device__ __inline__
+ #endif /* __CUDACC_RTC__ */
+ 
++#endif // defined(__CUDACC__)
++
++struct __align__(2) __half {
++   unsigned short x;
++#if defined(__CUDACC__)
++   __CUDA_FP16_MEMBER_FN_DECL__ __half() = default;
++   __CUDA_FP16_MEMBER_FN_DECL__ __half(const __half&) = default;
++   __CUDA_FP16_MEMBER_FN_DECL__ __half(__half&&) = default;
++   __CUDA_FP16_MEMBER_FN_DECL__ __half& operator=(const __half&) = default;
++   __CUDA_FP16_MEMBER_FN_DECL__ __half& operator=(__half&&) = default;
++
++   __CUDA_FP16_MEMBER_FN_DECL__ __half(const float &from);
++   __CUDA_FP16_MEMBER_FN_DECL__ operator float() const;
++#endif
++};
++
++typedef struct __align__(4) {
++   unsigned int x;
++} __half2;
++
++#ifndef CUDA_NO_HALF
++typedef __half half;
++typedef __half2 half2;
++#endif /*CUDA_NO_HALF*/
++
++#if defined(__CUDACC__)
+ /**
+  * \ingroup CUDA_MATH__HALF_MISC
+  * \brief Converts float number to half precision in round-to-nearest-even mode
+@@ -126,6 +141,7 @@
+  * \return Returns \p half result with converted value.
+  */
+ __CUDA_FP16_DECL__ __half __float2half(const float a);
++__CUDA_FP16_MEMBER_FN_DECL__ __half::__half(const float &from) : __half(__float2half(from)) { }
+ /**
+  * \ingroup CUDA_MATH__HALF_MISC
+  * \brief Converts float number to half precision in round-towards-zero mode
+@@ -165,6 +181,7 @@
+  * \return Returns float result with converted value.
+  */
+ __CUDA_FP16_DECL__ float __half2float(const __half a);
++__CUDA_FP16_MEMBER_FN_DECL__ __half::operator float() const { return __half2float(*this); }
+ 
+ /**
+  * \ingroup CUDA_MATH__HALF_MISC
+diff -aruN include/host_config.h include-patched/host_config.h
+--- include/host_config.h	2017-01-27 07:48:33.000000000 +0800
++++ include-patched/host_config.h	2026-04-09 01:40:34.624217705 +0800
+@@ -116,7 +116,7 @@
+ 
+ #if __GNUC__ > 5
+ 
+-#error -- unsupported GNU version! gcc versions later than 5 are not supported!
++#warning -- unsupported GNU version! gcc versions later than 5 are not supported; proceeding with no guarantee of a successful build!
+ 
+ #endif /* __GNUC__ > 5 */
+ 
+diff -aruN include/math_functions.h include-patched/math_functions.h
+--- include/math_functions.h	2017-01-27 07:48:33.000000000 +0800
++++ include-patched/math_functions.h	2026-04-09 01:40:36.460179325 +0800
+@@ -8894,11 +8918,15 @@
+ __DEVICE_FUNCTIONS_DECL__ __cudart_builtin__ constexpr bool isfinite(long double x);
+ __DEVICE_FUNCTIONS_DECL__ __cudart_builtin__ constexpr bool isnan(float x);
+ /* GCC 6.1 uses ::isnan(double x) for isnan(double x) */
++#if __GNUC__ <= 5
+ __DEVICE_FUNCTIONS_DECL__ __cudart_builtin__ int isnan(double x) throw();
++#endif
+ __DEVICE_FUNCTIONS_DECL__ __cudart_builtin__ constexpr bool isnan(long double x);
+ __DEVICE_FUNCTIONS_DECL__ __cudart_builtin__ constexpr bool isinf(float x);
+ /* GCC 6.1 uses ::isinf(double x) for isinf(double x) */
++#if __GNUC__ <= 5
+ __DEVICE_FUNCTIONS_DECL__ __cudart_builtin__ int isinf(double x) throw();
++#endif
+ __DEVICE_FUNCTIONS_DECL__ __cudart_builtin__ constexpr bool isinf(long double x);
+ } 
+diff -aruN include/thrust/system/cuda/detail/cub/block/specializations/block_reduce_raking_commutative_only.cuh include-patched/thrust/system/cuda/detail/cub/block/specializations/block_reduce_raking_commutative_only.cuh
+--- include/thrust/system/cuda/detail/cub/block/specializations/block_reduce_raking_commutative_only.cuh	2017-01-27 07:48:33.000000000 +0800
++++ include-patched/thrust/system/cuda/detail/cub/block/specializations/block_reduce_raking_commutative_only.cuh	2026-04-09 01:40:08.591136155 +0800
+@@ -133,7 +133,7 @@
+     {
+         if (USE_FALLBACK || !FULL_TILE)
+         {
+-            return FallBack(temp_storage.fallback_storage).template Sum<FULL_TILE>(partial, num_valid);
++            return FallBack(temp_storage.fallback_storage).template Reduce<FULL_TILE>(partial, num_valid, cub::Sum());
+         }
+         else
+         {
