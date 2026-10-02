@@ -28,7 +28,7 @@ For the convenience of testing, pre-built packages are [available](https://githu
 
 All patches implemented in this project can be found [here](patches)
 
-## Limitation
+## Limitations
 * For GPUs of CC 2.x
 
   1. The lowest compute capability ever supported by CUDNN, which is the key library to many CUDA versions of operators implemented in onnxruntime, is 3.0. Due to lack of CUDNN support, when executed on such GPUs a number of operators have to fall back to their CPU counterparts, and this has a huge impact on the degree of speedup of object detection models where the dominant operator, 2D convolution, is also accelerated through CUDNN api. For instance, with the yolov5nu model the inference time reported by frigate on my device (CC 2.1) showed that the GPU executor just spent similar running time to the one taken by the CPU executor, suggesting that most of operators were not accelerated at all.
